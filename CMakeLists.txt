@@ -16,6 +16,7 @@ add_executable(game
     src/Graphics/ParticleSystem.cpp
     src/Graphics/Starfield.cpp
     src/Entities/Powerup.cpp
+    src/Core/SaveSystem.cpp
 )
 
 target_link_libraries(game PRIVATE

@@ -19,6 +19,7 @@
 
 #include "Core/Config.hpp"
 #include "Audio/SoundEngine.hpp"
+#include "Core/SaveSystem.hpp"
 
 // ======================================================
 // GAME STATES & USER SETTINGS
@@ -32,6 +33,35 @@ float sfxVolume    = 0.85f;
 float musicVolume  = 0.55f;
 int screenShakeSetting = SHAKE_NORMAL;
 int shipAccentSetting = ACCENT_CYAN;
+int selectedShipArchetype = SHIP_VANGUARD;
+bool isFullscreen = false;
+
+// ======================================================
+// DELTA-TIME ENGINE (Dev 1 - Phase 1)
+// Makes physics buttery smooth on 60/120/144/240 Hz screens.
+// ======================================================
+
+#include <chrono>
+using ClockT = std::chrono::high_resolution_clock;
+using TimePoint = ClockT::time_point;
+
+TimePoint g_lastTime;
+float     g_dt = 0.016f;  // seconds; starts at 60 Hz equivalent
+
+void tickDeltaTime()
+{
+    TimePoint now = ClockT::now();
+    g_dt = std::chrono::duration<float>(now - g_lastTime).count();
+    // Clamp: if the window is dragged / minimised, don't explode physics
+    if (g_dt > 0.05f) g_dt = 0.05f;
+    if (g_dt < 0.001f) g_dt = 0.001f;
+    g_lastTime = now;
+}
+
+// Pixels-per-second speeds (replaces raw frame-count speeds)
+constexpr float PLAYER_SPEED_PPS  = 510.0f;  // base px/s  (~8.5 px @ 60 fps)
+constexpr float PLAYER_ACCEL_PPS  = 3400.0f; // px/s²  (ramp-up time ~0.15 s)
+constexpr float PLAYER_DRAG       = 12.0f;    // deceleration multiplier
 
 // ======================================================
 // SCREEN SHAKE
@@ -54,44 +84,47 @@ void triggerShake(float intensity)
 
 #include "Graphics/Renderer.hpp"
 #include "Graphics/ParticleSystem.hpp"
-
 #include "Graphics/Starfield.hpp"
-
 #include "Entities/Powerup.hpp"
 
 // ======================================================
-// PLAYER DEFINITION
+// PLAYER DEFINITION (Full 2D Physics, Inertia & Archetypes)
 // ======================================================
 
 float playerX = WIDTH / 2.0f;
-float playerY = 60.0f;
+float playerY = 70.0f;
+float playerVx = 0.0f;   // pixels/second (delta-time driven)
+float playerVy = 0.0f;
 
-const float PLAYER_WIDTH = 54.0f;
+const float PLAYER_WIDTH  = 54.0f;
 const float PLAYER_HEIGHT = 46.0f;
-const float BASE_PLAYER_SPEED = 8.5f;
+const float BASE_PLAYER_SPEED = 8.5f; // kept for shoot() momentum reference
 
 int invulnerableTimer = 0;
 int animFrame = 0;
+float dashCooldownTime = 0.0f;  // seconds remaining (delta-time)
+float dashActiveTime   = 0.0f;  // >0 → currently dashing (i-frames)
 
-// Active Power-up Timers
-int shieldHealth = 0;      // > 0 means shield active (absorbs hits)
-int tripleShotTimer = 0;   // Frames remaining
-int pentaShotTimer = 0;    // Frames remaining (5-way barrage!)
-int rapidFireTimer = 0;    // Frames remaining
-int speedBoostTimer = 0;   // Frames remaining (hyper-thruster)
-int timeSlowTimer = 0;     // Frames remaining (chrono-warp)
-int empBombsStock = 1;     // Number of EMP bombs in storage
+// Active Power-up Timers (in seconds, delta-time driven)
+int shieldHealth = 0;
+float tripleShotTimer = 0.0f;
+float pentaShotTimer  = 0.0f;
+float rapidFireTimer  = 0.0f;
+float speedBoostTimer = 0.0f;
+float timeSlowTimer   = 0.0f;
+int   empBombsStock   = 1;
 
-// Continuous firing state & cadence
-bool spacePressed = false;
-int shootCooldown = 0;
-int cannonAlternator = 0;
+// Continuous firing state & cadence (in seconds)
+bool  spacePressed    = false;
+float shootCooldown   = 0.0f;
+int   cannonAlternator = 0;
 
 // Keyboard navigation state
-bool leftPressed = false;
+bool leftPressed  = false;
 bool rightPressed = false;
-bool upPressed = false;
-bool downPressed = false;
+bool upPressed    = false;
+bool downPressed  = false;
+bool shiftPressed = false;
 
 // ======================================================
 // BULLETS
@@ -645,7 +678,7 @@ void drawHUD()
     if (pentaShotTimer > 0)
     {
         char buf[32];
-        sprintf(buf, "[PENTA: %ds]", pentaShotTimer / 60);
+        sprintf(buf, "[PENTA: %ds]", (int)(pentaShotTimer / 60));
         glColor3f(0.95f, 0.2f, 1.0f);
         renderGlText(powerUpX, powerUpY, buf, GLUT_BITMAP_HELVETICA_12);
         powerUpX += 95.0f;
@@ -653,7 +686,7 @@ void drawHUD()
     else if (tripleShotTimer > 0)
     {
         char buf[32];
-        sprintf(buf, "[TRIPLE: %ds]", tripleShotTimer / 60);
+        sprintf(buf, "[TRIPLE: %ds]", (int)(tripleShotTimer / 60));
         glColor3f(1.0f, 0.85f, 0.1f);
         renderGlText(powerUpX, powerUpY, buf, GLUT_BITMAP_HELVETICA_12);
         powerUpX += 95.0f;
@@ -662,7 +695,7 @@ void drawHUD()
     if (rapidFireTimer > 0)
     {
         char buf[32];
-        sprintf(buf, "[RAPID: %ds]", rapidFireTimer / 60);
+        sprintf(buf, "[RAPID: %ds]", (int)(rapidFireTimer / 60));
         glColor3f(1.0f, 0.3f, 0.3f);
         renderGlText(powerUpX, powerUpY, buf, GLUT_BITMAP_HELVETICA_12);
         powerUpX += 95.0f;
@@ -671,7 +704,7 @@ void drawHUD()
     if (speedBoostTimer > 0)
     {
         char buf[32];
-        sprintf(buf, "[SPEED: %ds]", speedBoostTimer / 60);
+        sprintf(buf, "[SPEED: %ds]", (int)(speedBoostTimer / 60));
         glColor3f(0.0f, 1.0f, 0.85f);
         renderGlText(powerUpX, powerUpY, buf, GLUT_BITMAP_HELVETICA_12);
         powerUpX += 95.0f;
@@ -680,7 +713,7 @@ void drawHUD()
     if (timeSlowTimer > 0)
     {
         char buf[32];
-        sprintf(buf, "[CHRONO: %ds]", timeSlowTimer / 60);
+        sprintf(buf, "[CHRONO: %ds]", (int)(timeSlowTimer / 60));
         glColor3f(0.3f, 0.7f, 1.0f);
         renderGlText(powerUpX, powerUpY, buf, GLUT_BITMAP_HELVETICA_12);
         powerUpX += 95.0f;
@@ -849,7 +882,8 @@ void drawMainMenu()
     drawButton(bx, startY, bw, bh, "  START MISSION", menuSelectedIdx == 0);
     drawButton(bx, startY - gap, bw, bh, "     SETTINGS", menuSelectedIdx == 1);
     drawButton(bx, startY - gap * 2, bw, bh, "  HOW TO PLAY", menuSelectedIdx == 2);
-    drawButton(bx, startY - gap * 3, bw, bh, "   QUIT GAME", menuSelectedIdx == 3);
+    drawButton(bx, startY - gap * 3, bw, bh, "  LEADERBOARD", menuSelectedIdx == 3);
+    drawButton(bx, startY - gap * 4, bw, bh, "   QUIT GAME", menuSelectedIdx == 4);
 
     glColor3f(0.6f, 0.7f, 0.85f);
     renderGlText(WIDTH / 2 - 160, 40, "Controls: Arrows / WASD to Select, Space / Enter to Confirm", GLUT_BITMAP_HELVETICA_12);
@@ -992,6 +1026,98 @@ void drawHowToPlay()
     drawButton(bx, 30.0f, bw, bh, "    < RETURN >", true);
 }
 
+// ======================================================
+// LEADERBOARD SCREEN (Dev 3 - Phase 1)
+// Persistent top-10 high scores saved to scores.dat
+// ======================================================
+
+void drawLeaderboard()
+{
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    glColor4f(0.02f, 0.03f, 0.10f, 0.93f);
+    glBegin(GL_QUADS);
+        glVertex2f(0, 0); glVertex2f(WIDTH, 0);
+        glVertex2f(WIDTH, HEIGHT); glVertex2f(0, HEIGHT);
+    glEnd();
+
+    // Panel glow border
+    glColor4f(0.2f, 0.7f, 1.0f, 0.55f);
+    glLineWidth(2.0f);
+    glBegin(GL_LINE_LOOP);
+        glVertex2f(60.0f, 55.0f);          glVertex2f(WIDTH - 60.0f, 55.0f);
+        glVertex2f(WIDTH - 60.0f, HEIGHT - 55.0f); glVertex2f(60.0f, HEIGHT - 55.0f);
+    glEnd();
+    glLineWidth(1.0f);
+
+    float pulse = 0.85f + 0.15f * sinf(animFrame * 0.08f);
+    glColor3f(1.0f * pulse, 0.85f * pulse, 0.2f);
+    renderGlText(WIDTH / 2 - 105, HEIGHT - 90, "HIGH SCORE LEADERBOARD", GLUT_BITMAP_TIMES_ROMAN_24);
+
+    glColor3f(0.4f, 0.85f, 1.0f);
+    renderGlText(90,  HEIGHT - 130, "RANK",   GLUT_BITMAP_HELVETICA_12);
+    renderGlText(170, HEIGHT - 130, "PILOT",  GLUT_BITMAP_HELVETICA_12);
+    renderGlText(380, HEIGHT - 130, "SCORE",  GLUT_BITMAP_HELVETICA_12);
+    renderGlText(510, HEIGHT - 130, "SECTOR", GLUT_BITMAP_HELVETICA_12);
+    renderGlText(590, HEIGHT - 130, "DATE",   GLUT_BITMAP_HELVETICA_12);
+
+    glColor4f(0.3f, 0.6f, 1.0f, 0.45f);
+    glBegin(GL_LINES);
+        glVertex2f(80.0f, HEIGHT - 140.0f); glVertex2f(WIDTH - 80.0f, HEIGHT - 140.0f);
+    glEnd();
+
+    const auto& board = SaveSystem::getLeaderboard();
+    float rowY = HEIGHT - 165.0f;
+    const float rowH = 30.0f;
+
+    if (board.empty())
+    {
+        glColor3f(0.6f, 0.65f, 0.75f);
+        renderGlText(WIDTH / 2 - 140, HEIGHT / 2, "No scores yet -- play a mission first!", GLUT_BITMAP_HELVETICA_12);
+    }
+
+    for (int i = 0; i < (int)board.size() && i < 10; i++)
+    {
+        const ScoreEntry& e = board[i];
+
+        glColor4f(0.07f, 0.12f, 0.22f, (i % 2 == 0) ? 0.55f : 0.35f);
+        glBegin(GL_QUADS);
+            glVertex2f(80.0f, rowY - 4.0f);   glVertex2f(WIDTH - 80.0f, rowY - 4.0f);
+            glVertex2f(WIDTH - 80.0f, rowY + rowH - 4.0f); glVertex2f(80.0f, rowY + rowH - 4.0f);
+        glEnd();
+
+        if      (i == 0) glColor3f(1.0f,  0.85f, 0.1f);
+        else if (i == 1) glColor3f(0.75f, 0.78f, 0.82f);
+        else if (i == 2) glColor3f(0.8f,  0.5f,  0.2f);
+        else             glColor3f(0.8f,  0.85f, 0.9f);
+
+        char rankBuf[8]; sprintf(rankBuf, "#%d", i + 1);
+        renderGlText(90,  rowY + 8.0f, rankBuf, GLUT_BITMAP_HELVETICA_12);
+
+        glColor3f(0.9f, 0.95f, 1.0f);
+        renderGlText(170, rowY + 8.0f, e.pilotName.c_str(), GLUT_BITMAP_HELVETICA_12);
+
+        char scoreBuf[32]; sprintf(scoreBuf, "%d", e.score);
+        glColor3f(0.3f, 1.0f, 0.55f);
+        renderGlText(380, rowY + 8.0f, scoreBuf, GLUT_BITMAP_HELVETICA_12);
+
+        char secBuf[8]; sprintf(secBuf, "%d", e.sector);
+        glColor3f(0.85f, 0.65f, 1.0f);
+        renderGlText(510, rowY + 8.0f, secBuf, GLUT_BITMAP_HELVETICA_12);
+
+        glColor3f(0.55f, 0.65f, 0.75f);
+        renderGlText(590, rowY + 8.0f, e.date.c_str(), GLUT_BITMAP_HELVETICA_12);
+
+        rowY -= rowH;
+    }
+
+    float bw = 220.0f, bh = 38.0f;
+    drawButton(WIDTH / 2.0f - bw / 2.0f, 28.0f, bw, bh, "    < BACK TO MENU >", true);
+    glColor3f(0.55f, 0.65f, 0.8f);
+    renderGlText(WIDTH / 2 - 165, 14, "Scores saved to scores.dat  |  Press Enter or click BACK", GLUT_BITMAP_HELVETICA_12);
+}
+
 void drawGameOver()
 {
     glEnable(GL_BLEND);
@@ -1005,7 +1131,7 @@ void drawGameOver()
     glEnd();
 
     glColor3f(1.0f, 0.22f, 0.22f);
-    renderGlText(WIDTH / 2 - 80, HEIGHT / 2 + 95, "GAME OVER", GLUT_BITMAP_TIMES_ROMAN_24);
+    renderGlText(WIDTH / 2 - 80, HEIGHT / 2 + 115, "GAME OVER", GLUT_BITMAP_TIMES_ROMAN_24);
 
     char finalScore[64];
     char finalWave[64];
@@ -1013,21 +1139,22 @@ void drawGameOver()
     sprintf(finalWave, "Sector Reached: %s", sectorThemes[currentSector % NUM_SECTORS].name);
 
     glColor3f(1.0f, 1.0f, 1.0f);
-    renderGlText(WIDTH / 2 - 60, HEIGHT / 2 + 45, finalScore);
-    renderGlText(WIDTH / 2 - 110, HEIGHT / 2 + 15, finalWave);
+    renderGlText(WIDTH / 2 - 60, HEIGHT / 2 + 65, finalScore);
+    renderGlText(WIDTH / 2 - 110, HEIGHT / 2 + 35, finalWave);
 
     if (score >= highScore && score > 0)
     {
         glColor3f(1.0f, 0.9f, 0.1f);
-        renderGlText(WIDTH / 2 - 85, HEIGHT / 2 - 20, "*** NEW HIGH SCORE! ***", GLUT_BITMAP_HELVETICA_12);
+        renderGlText(WIDTH / 2 - 85, HEIGHT / 2, "*** NEW HIGH SCORE! ***", GLUT_BITMAP_HELVETICA_12);
     }
 
     float bw = 240.0f;
     float bh = 42.0f;
     float bx = WIDTH / 2.0f - bw / 2.0f;
 
-    drawButton(bx, HEIGHT / 2.0f - 80.0f, bw, bh, "  RETRY MISSION", menuSelectedIdx == 0);
-    drawButton(bx, HEIGHT / 2.0f - 135.0f, bw, bh, "    MAIN MENU", menuSelectedIdx == 1);
+    drawButton(bx, HEIGHT / 2.0f - 55.0f,  bw, bh, "  RETRY MISSION",  menuSelectedIdx == 0);
+    drawButton(bx, HEIGHT / 2.0f - 110.0f, bw, bh, "  VIEW SCORES",    menuSelectedIdx == 1);
+    drawButton(bx, HEIGHT / 2.0f - 165.0f, bw, bh, "    MAIN MENU",    menuSelectedIdx == 2);
 }
 
 // ======================================================
@@ -1054,27 +1181,22 @@ void spawnPlayerBullet(float x, float y, float vx, float vy)
 
 void shoot()
 {
-    float currentSpeed = BASE_PLAYER_SPEED * (speedBoostTimer > 0 ? 1.6f : 1.0f);
-    float playerVx = 0.0f;
-    if (leftPressed && !rightPressed)
-        playerVx = -currentSpeed;
-    else if (rightPressed && !leftPressed)
-        playerVx = currentSpeed;
+// currentSpeed removed – unused
+    // Use real velocity for bullet momentum (not a fresh local variable)
+    float inheritedVx = playerVx * 0.006f; // px/frame equivalent: vx(px/s)*0.006 ≈ vx/60*0.4
 
-    float inheritedVx = playerVx * 0.42f;
-
-    if (pentaShotTimer > 0)
+    if (pentaShotTimer > 0.0f)
     {
         // 5-Way Nova Barrage!
         spawnPlayerBullet(playerX - 22.0f, playerY + 15.0f, inheritedVx - 5.5f, BULLET_SPEED * 0.9f);
         spawnPlayerBullet(playerX - 12.0f, playerY + 28.0f, inheritedVx - 2.8f, BULLET_SPEED * 0.95f);
-        spawnPlayerBullet(playerX, playerY + PLAYER_HEIGHT, inheritedVx, BULLET_SPEED);
+        spawnPlayerBullet(playerX,         playerY + PLAYER_HEIGHT, inheritedVx, BULLET_SPEED);
         spawnPlayerBullet(playerX + 12.0f, playerY + 28.0f, inheritedVx + 2.8f, BULLET_SPEED * 0.95f);
         spawnPlayerBullet(playerX + 22.0f, playerY + 15.0f, inheritedVx + 5.5f, BULLET_SPEED * 0.9f);
 
         playSfx(SFX_LASER_PENTA, 0.85f);
     }
-    else if (tripleShotTimer > 0)
+    else if (tripleShotTimer > 0.0f)
     {
         // 3-Way Laser Spread
         spawnPlayerBullet(playerX - 18.0f, playerY + 20.0f, inheritedVx - 3.4f, BULLET_SPEED * 0.95f);
@@ -1273,43 +1395,47 @@ void nextSector()
 
 void initializeGame()
 {
-    playerX = WIDTH / 2.0f;
-    playerY = 60.0f;
+    playerX  = WIDTH / 2.0f;
+    playerY  = 60.0f;
+    playerVx = 0.0f;
+    playerVy = 0.0f;
 
     score = 0;
     lives = 3;
-    wave = 1;
-    currentSector = 0;
-    sectorThemeIndex = 0;
-    currentMusicTempo = sectorThemes[0].tempo;
+    wave  = 1;
+    currentSector      = 0;
+    sectorThemeIndex   = 0;
+    currentMusicTempo  = sectorThemes[0].tempo;
     sectorAnnouncementTimer = 120;
 
     comboCount = 0;
     comboTimer = 0;
 
     gameOver = false;
-    paused = false;
+    paused   = false;
 
     invulnerableTimer = 0;
-    animFrame = 0;
-    screenShake = 0.0f;
+    animFrame         = 0;
+    screenShake       = 0.0f;
+    dashCooldownTime  = 0.0f;
+    dashActiveTime    = 0.0f;
 
-    shieldHealth = 0;
-    tripleShotTimer = 0;
-    pentaShotTimer = 0;
-    rapidFireTimer = 0;
-    speedBoostTimer = 0;
-    timeSlowTimer = 0;
-    empBombsStock = 1;
+    shieldHealth    = 0;
+    tripleShotTimer = 0.0f;
+    pentaShotTimer  = 0.0f;
+    rapidFireTimer  = 0.0f;
+    speedBoostTimer = 0.0f;
+    timeSlowTimer   = 0.0f;
+    empBombsStock   = 1;
 
-    spacePressed = false;
-    shootCooldown = 0;
+    spacePressed     = false;
+    shootCooldown    = 0.0f;
     cannonAlternator = 0;
 
-    leftPressed = false;
+    leftPressed  = false;
     rightPressed = false;
-    upPressed = false;
-    downPressed = false;
+    upPressed    = false;
+    downPressed  = false;
 
     currentBoss.active = false;
 
@@ -1336,36 +1462,45 @@ void initializeGame()
 
 void update(int value)
 {
+    // ------ Delta-Time tick ------
+    tickDeltaTime();
+    float dt = g_dt;
+
     if (currentGameState == STATE_PLAYING && !gameOver && !paused)
     {
         animFrame++;
 
-        // Timers & Cooldowns
-        if (invulnerableTimer > 0) invulnerableTimer--;
-        if (tripleShotTimer > 0)   tripleShotTimer--;
-        if (pentaShotTimer > 0)    pentaShotTimer--;
-        if (rapidFireTimer > 0)    rapidFireTimer--;
-        if (speedBoostTimer > 0)   speedBoostTimer--;
-        if (timeSlowTimer > 0)     timeSlowTimer--;
-        if (shootCooldown > 0)     shootCooldown--;
+        // ------ Timers & Cooldowns (delta-time, in seconds) ------
+// invulDelta removed – unused
+        if (invulnerableTimer > 0) invulnerableTimer = std::max(0, invulnerableTimer - 1);
+
+        if (tripleShotTimer > 0.0f)  tripleShotTimer  = std::max(0.0f, tripleShotTimer  - dt);
+        if (pentaShotTimer  > 0.0f)  pentaShotTimer   = std::max(0.0f, pentaShotTimer   - dt);
+        if (rapidFireTimer  > 0.0f)  rapidFireTimer   = std::max(0.0f, rapidFireTimer   - dt);
+        if (speedBoostTimer > 0.0f)  speedBoostTimer  = std::max(0.0f, speedBoostTimer  - dt);
+        if (timeSlowTimer   > 0.0f)  timeSlowTimer    = std::max(0.0f, timeSlowTimer    - dt);
+        if (shootCooldown   > 0.0f)  shootCooldown    = std::max(0.0f, shootCooldown    - dt);
+        if (dashCooldownTime > 0.0f) dashCooldownTime = std::max(0.0f, dashCooldownTime - dt);
+        if (dashActiveTime  > 0.0f)
+        {
+            dashActiveTime = std::max(0.0f, dashActiveTime - dt);
+            invulnerableTimer = (dashActiveTime > 0.0f) ? 1 : invulnerableTimer;
+        }
         if (sectorAnnouncementTimer > 0) sectorAnnouncementTimer--;
 
-        // Combo decay
+        // Combo decay (~2 seconds)
         if (comboTimer > 0)
         {
             comboTimer--;
-            if (comboTimer <= 0)
-            {
-                comboCount = 0;
-            }
+            if (comboTimer <= 0) comboCount = 0;
         }
 
-        // Continuous Firing Handling
-        if (spacePressed && shootCooldown <= 0)
+        // ------ Continuous Firing (delta-time cadence) ------
+        // Rapid = ~8 shots/s (0.125s), Normal = ~6 shots/s (0.167s)
+        if (spacePressed && shootCooldown <= 0.0f)
         {
             shoot();
-            // Cadence: Rapid = 5 frames, Normal = 10 frames
-            shootCooldown = (rapidFireTimer > 0) ? 5 : 10;
+            shootCooldown = (rapidFireTimer > 0.0f) ? 0.083f : 0.167f;
         }
 
         // Background & Particles
@@ -1374,26 +1509,71 @@ void update(int value)
         updateFloatingTexts();
         updatePowerUps();
 
-        // Player Movement with Speed Boost multiplier
-        float currentSpeed = BASE_PLAYER_SPEED * (speedBoostTimer > 0 ? 1.6f : 1.0f);
-        if (leftPressed)  playerX -= currentSpeed;
-        if (rightPressed) playerX += currentSpeed;
+        // ======================================================
+        // FULL 2D PLAYER MOVEMENT WITH INERTIA (Dev 2 - Phase 1)
+        // ======================================================
+        float speedMult  = (speedBoostTimer > 0.0f) ? 1.6f : 1.0f;
+        float maxSpeedPPS = PLAYER_SPEED_PPS * speedMult;
 
-        if (playerX < PLAYER_WIDTH / 2.0f)
-            playerX = PLAYER_WIDTH / 2.0f;
-        if (playerX > WIDTH - PLAYER_WIDTH / 2.0f)
-            playerX = WIDTH - PLAYER_WIDTH / 2.0f;
+        // Horizontal acceleration
+        if (leftPressed  && !rightPressed) playerVx -= PLAYER_ACCEL_PPS * dt;
+        else if (rightPressed && !leftPressed) playerVx += PLAYER_ACCEL_PPS * dt;
+        else playerVx *= powf(0.001f, dt); // drag: exponential decay toward zero
 
-        // Bullets Movement
-        float enemySpeedScale = (timeSlowTimer > 0) ? 0.45f : 1.0f;
+        // Vertical acceleration (W = up, S = down — gameplay only)
+        if (upPressed   && !downPressed) playerVy += PLAYER_ACCEL_PPS * dt;
+        else if (downPressed && !upPressed) playerVy -= PLAYER_ACCEL_PPS * dt;
+        else playerVy *= powf(0.001f, dt);
+
+        // Clamp to max speed
+        playerVx = std::max(-maxSpeedPPS, std::min(maxSpeedPPS, playerVx));
+        playerVy = std::max(-maxSpeedPPS, std::min(maxSpeedPPS, playerVy));
+
+        // Apply velocity
+        playerX += playerVx * dt;
+        playerY += playerVy * dt;
+
+        // Boundary clamping
+        // Horizontal: full screen
+        if (playerX < PLAYER_WIDTH / 2.0f)       { playerX = PLAYER_WIDTH / 2.0f;       playerVx = 0.0f; }
+        if (playerX > WIDTH - PLAYER_WIDTH / 2.0f){ playerX = WIDTH - PLAYER_WIDTH / 2.0f; playerVx = 0.0f; }
+        // Vertical: lower 65% of playfield only
+        float yMin = PLAYER_HEIGHT;
+        float yMax = HEIGHT * 0.65f;
+        if (playerY < yMin) { playerY = yMin; playerVy = 0.0f; }
+        if (playerY > yMax) { playerY = yMax; playerVy = 0.0f; }
+
+        // ------ Tactical Dash (Shift key) ------
+        if (shiftPressed && dashCooldownTime <= 0.0f && dashActiveTime <= 0.0f)
+        {
+            // Dash in the direction currently moving; default forward if idle
+            float dashSpeedX = leftPressed ? -1.0f : (rightPressed ? 1.0f : 0.0f);
+            float dashSpeedY = upPressed   ?  1.0f : (downPressed  ? -1.0f : 0.0f);
+            if (dashSpeedX == 0.0f && dashSpeedY == 0.0f) dashSpeedY = 1.0f; // default: forward dash
+
+            float dashImpulse = maxSpeedPPS * 2.5f;
+            playerVx = dashSpeedX * dashImpulse;
+            playerVy = dashSpeedY * dashImpulse;
+
+            dashActiveTime   = 0.30f;  // 0.3s of i-frames
+            dashCooldownTime = 1.20f;  // 1.2s cooldown
+            invulnerableTimer = 18;    // ~0.3s at 60fps (visual blink)
+
+            spawnEngineTrail(playerX, playerY + PLAYER_HEIGHT / 2.0f, 1.0f, 0.9f, 0.2f, -dashSpeedY * 6.0f);
+        }
+
+        // Bullets Movement (delta-time scaled: bullet vx/vy are in px/frame @ 60fps,
+        // so multiply by dt*60 to keep identical feel on all refresh rates)
+        float enemySpeedScale = (timeSlowTimer > 0.0f) ? 0.45f : 1.0f;
+        float dtScale = dt * 60.0f; // normalise so 60 Hz behaviour is unchanged
 
         for (int i = 0; i < MAX_BULLETS; i++)
         {
             if (bullets[i].active)
             {
                 float bulletScale = bullets[i].isEnemy ? enemySpeedScale : 1.0f;
-                bullets[i].x += bullets[i].vx * bulletScale;
-                bullets[i].y += bullets[i].vy * bulletScale;
+                bullets[i].x += bullets[i].vx * bulletScale * dtScale;
+                bullets[i].y += bullets[i].vy * bulletScale * dtScale;
 
                 if (bullets[i].y > HEIGHT + 25.0f || bullets[i].y < -25.0f ||
                     bullets[i].x < -25.0f || bullets[i].x > WIDTH + 25.0f)
@@ -1452,14 +1632,14 @@ void update(int value)
             }
         }
 
-        // --- Move Enemies & Enemy Shooting ---
+        // --- Move Enemies & Enemy Shooting (delta-time scaled) ---
         for (int i = 0; i < MAX_ENEMIES; i++)
         {
             if (!enemies[i].active)
                 continue;
 
-            enemies[i].y -= enemies[i].speed * enemySpeedScale;
-            enemies[i].x += sinf(enemies[i].y * 0.035f + enemies[i].wobbleOffset) * 1.25f * enemySpeedScale;
+            enemies[i].y -= enemies[i].speed * enemySpeedScale * dtScale;
+            enemies[i].x += sinf(enemies[i].y * 0.035f + enemies[i].wobbleOffset) * 1.25f * enemySpeedScale * dtScale;
 
             if (enemies[i].x < ENEMY_WIDTH / 2.0f)
                 enemies[i].x = ENEMY_WIDTH / 2.0f;
@@ -1473,7 +1653,7 @@ void update(int value)
                 spawnEnemyBullet(enemies[i].x, enemies[i].y);
                 playSfx(SFX_LASER_ENEMY, 0.35f);
                 enemies[i].shootTimer = (enemies[i].type == 1) ? (50 + rand() % 60) : (80 + rand() % 80);
-                if (timeSlowTimer > 0) enemies[i].shootTimer *= 2;
+                if (timeSlowTimer > 0.0f) enemies[i].shootTimer *= 2;
             }
 
             // Enemy reaches bottom defense line
@@ -1493,6 +1673,7 @@ void update(int value)
                     currentGameState = STATE_GAME_OVER;
                     playSfx(SFX_GAME_OVER, 1.0f);
                     if (score > highScore) highScore = score;
+                    SaveSystem::registerScore(score, currentSector);
                 }
             }
         }
@@ -1751,7 +1932,7 @@ void update(int value)
     }
 
     glutPostRedisplay();
-    glutTimerFunc(16, update, 0); // ~60 FPS
+    glutTimerFunc(1, update, 0); // 1ms minimum — actual pacing from delta-time
 }
 
 // ======================================================
@@ -1842,6 +2023,10 @@ void display()
         drawHUD();
         drawGameOver();
     }
+    else if (currentGameState == STATE_LEADERBOARD)
+    {
+        drawLeaderboard();
+    }
 
     glutSwapBuffers();
 }
@@ -1893,10 +2078,10 @@ void keyboardDown(unsigned char key, int x, int y)
         case 'S':
             downPressed = true;
             playSfx(SFX_UI_CLICK, 0.5f);
-            if (currentGameState == STATE_MAIN_MENU) menuSelectedIdx = std::min(3, menuSelectedIdx + 1);
+            if (currentGameState == STATE_MAIN_MENU)  menuSelectedIdx = std::min(4, menuSelectedIdx + 1);
             else if (currentGameState == STATE_PAUSED) menuSelectedIdx = std::min(3, menuSelectedIdx + 1);
             else if (currentGameState == STATE_SETTINGS) menuSelectedIdx = std::min(5, menuSelectedIdx + 1);
-            else if (currentGameState == STATE_GAME_OVER) menuSelectedIdx = std::min(1, menuSelectedIdx + 1);
+            else if (currentGameState == STATE_GAME_OVER) menuSelectedIdx = std::min(2, menuSelectedIdx + 1);
             break;
 
         case 'b':
@@ -1933,6 +2118,14 @@ void keyboardDown(unsigned char key, int x, int y)
                 }
                 else if (menuSelectedIdx == 3)
                 {
+                    // Leaderboard (Dev 3 - Phase 1)
+                    previousState = STATE_MAIN_MENU;
+                    menuSelectedIdx = 0;
+                    currentGameState = STATE_LEADERBOARD;
+                }
+                else if (menuSelectedIdx == 4)
+                {
+                    SaveSystem::shutdown();
                     shutdownAudio();
                     exit(0);
                 }
@@ -1961,8 +2154,15 @@ void keyboardDown(unsigned char key, int x, int y)
             else if (currentGameState == STATE_GAME_OVER)
             {
                 playSfx(SFX_UI_CLICK, 0.8f);
-                if (menuSelectedIdx == 0) { initializeGame(); currentGameState = STATE_PLAYING; }
-                else if (menuSelectedIdx == 1) { currentGameState = STATE_MAIN_MENU; menuSelectedIdx = 0; }
+                if (menuSelectedIdx == 0)      { initializeGame(); currentGameState = STATE_PLAYING; }
+                else if (menuSelectedIdx == 1) { previousState = STATE_GAME_OVER; menuSelectedIdx = 0; currentGameState = STATE_LEADERBOARD; }
+                else if (menuSelectedIdx == 2) { currentGameState = STATE_MAIN_MENU; menuSelectedIdx = 0; }
+            }
+            else if (currentGameState == STATE_LEADERBOARD)
+            {
+                // Any confirm key returns to previous screen
+                currentGameState = previousState;
+                menuSelectedIdx = 0;
             }
             break;
 
@@ -1988,6 +2188,15 @@ void keyboardDown(unsigned char key, int x, int y)
                 initializeGame();
                 currentGameState = STATE_PLAYING;
             }
+            break;
+
+        // ---- SHIFT: Tactical Dash (Dev 2 - Phase 1) ----
+        case 16: // Shift key (some systems send 16 for Shift)
+            shiftPressed = true;
+            break;
+
+        // ---- F11: Fullscreen Toggle (Dev 1 - Phase 1) ----
+        case 122: // 'z' as proxy; real F11 is a special key handled in specialKeyDown
             break;
 
         case 27: // ESC key
@@ -2023,29 +2232,12 @@ void keyboardUp(unsigned char key, int x, int y)
 {
     switch (key)
     {
-        case 'a':
-        case 'A':
-            leftPressed = false;
-            break;
-
-        case 'd':
-        case 'D':
-            rightPressed = false;
-            break;
-
-        case 'w':
-        case 'W':
-            upPressed = false;
-            break;
-
-        case 's':
-        case 'S':
-            downPressed = false;
-            break;
-
-        case ' ':
-            spacePressed = false;
-            break;
+        case 'a': case 'A': leftPressed  = false; break;
+        case 'd': case 'D': rightPressed = false; break;
+        case 'w': case 'W': upPressed    = false; break;
+        case 's': case 'S': downPressed  = false; break;
+        case ' ':           spacePressed = false; break;
+        case 16:            shiftPressed = false; break; // Shift release
     }
 }
 
@@ -2086,10 +2278,21 @@ void specialKeyDown(int key, int x, int y)
         case GLUT_KEY_DOWN:
             downPressed = true;
             playSfx(SFX_UI_CLICK, 0.5f);
-            if (currentGameState == STATE_MAIN_MENU) menuSelectedIdx = std::min(3, menuSelectedIdx + 1);
+            if (currentGameState == STATE_MAIN_MENU)  menuSelectedIdx = std::min(4, menuSelectedIdx + 1);
             else if (currentGameState == STATE_PAUSED) menuSelectedIdx = std::min(3, menuSelectedIdx + 1);
             else if (currentGameState == STATE_SETTINGS) menuSelectedIdx = std::min(5, menuSelectedIdx + 1);
-            else if (currentGameState == STATE_GAME_OVER) menuSelectedIdx = std::min(1, menuSelectedIdx + 1);
+            else if (currentGameState == STATE_GAME_OVER) menuSelectedIdx = std::min(2, menuSelectedIdx + 1);
+            break;
+
+        case GLUT_KEY_F11: // F11 fullscreen toggle (Dev 1 - Phase 1)
+            isFullscreen = !isFullscreen;
+            if (isFullscreen)
+                glutFullScreen();
+            else
+            {
+                glutReshapeWindow(WIDTH, HEIGHT);
+                glutPositionWindow(100, 50);
+            }
             break;
     }
 }
@@ -2318,8 +2521,12 @@ int main(int argc, char** argv)
     glutCreateWindow("NEO NOVA: 2D Space Shooter - Enhanced Sector Edition");
 
     init();
+    SaveSystem::init();   // Dev 3 - Phase 1: load persistent settings & high scores
     initAudio();
     initializeGame();
+
+    // Seed delta-time clock (Dev 1 - Phase 1)
+    g_lastTime = ClockT::now();
 
     glutDisplayFunc(display);
     glutReshapeFunc(reshape);
@@ -2329,10 +2536,11 @@ int main(int argc, char** argv)
     glutSpecialUpFunc(specialKeyUp);
     glutMouseFunc(mouseClick);
 
-    glutTimerFunc(16, update, 0);
+    glutTimerFunc(1, update, 0); // 1ms kick-start; delta-time controls actual speed
 
     glutMainLoop();
 
+    SaveSystem::shutdown(); // Persist settings & scores on clean exit
     shutdownAudio();
     return 0;
 }

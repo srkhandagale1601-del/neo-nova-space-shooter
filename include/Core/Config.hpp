@@ -19,6 +19,7 @@ enum GameState
     STATE_SETTINGS,
     STATE_HOW_TO_PLAY,
     STATE_GAME_OVER,
+    STATE_LEADERBOARD,   // Dev 3 - Phase 1
     STATE_SECTOR_CLEAR
 };
 
@@ -48,3 +49,12 @@ enum ShipAccentColor
     ACCENT_COUNT
 };
 extern int shipAccentSetting;
+
+enum ShipArchetypeType
+{
+    SHIP_VANGUARD = 0,   // Vanguard Interceptor: High speed, rapid cadence, 3 HP
+    SHIP_AEGIS,          // Aegis Dreadnought: Tank, innate forcefield, 6 HP
+    SHIP_MIRAGE,         // Mirage Gunship: Micro-missile spread, 4 HP
+    SHIP_ARCHETYPE_COUNT
+};
+extern int selectedShipArchetype;
