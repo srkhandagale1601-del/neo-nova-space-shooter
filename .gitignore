@@ -1,0 +1,29 @@
+# Binaries & Executables
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Object files & Libraries
+*.o
+*.obj
+*.a
+*.lib
+
+# Build directories
+build/
+bin/
+out/
+.cache/
+
+# IDE & Editor files
+.vscode/
+.vs/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Logs & Dumps
+*.log
+*.dmp
