@@ -39,20 +39,27 @@ if "!COMPILER_FOUND!"=="0" (
 )
 
 echo Using compiler: !CXX!
-echo Compiling main.cpp...
+echo Compiling project sources...
 
-!CXX! -O2 -Wall main.cpp -o game.exe -lfreeglut -lopengl32 -lglu32 -lwinmm
+!CXX! -O2 -Wall -std=c++11 -Iinclude main.cpp src/Audio/SoundEngine.cpp src/Graphics/Renderer.cpp src/Graphics/ParticleSystem.cpp src/Graphics/Starfield.cpp src/Entities/Powerup.cpp -o game.exe -static-libgcc -static-libstdc++ -lfreeglut -lopengl32 -lglu32 -lwinmm
 if %errorlevel% neq 0 (
     echo [ERROR] Build failed! Check the error messages above.
     exit /b %errorlevel%
 )
 
-:: Ensure libfreeglut.dll is in the project directory
+:: Ensure runtime DLLs are present in the project directory
 if not exist "libfreeglut.dll" (
     if exist "C:\msys64\ucrt64\bin\libfreeglut.dll" (
         copy /y "C:\msys64\ucrt64\bin\libfreeglut.dll" "libfreeglut.dll" >nul
     ) else if exist "C:\msys64\mingw64\bin\libfreeglut.dll" (
         copy /y "C:\msys64\mingw64\bin\libfreeglut.dll" "libfreeglut.dll" >nul
+    )
+)
+if not exist "libwinpthread-1.dll" (
+    if exist "C:\msys64\ucrt64\bin\libwinpthread-1.dll" (
+        copy /y "C:\msys64\ucrt64\bin\libwinpthread-1.dll" "libwinpthread-1.dll" >nul
+    ) else if exist "C:\msys64\mingw64\bin\libwinpthread-1.dll" (
+        copy /y "C:\msys64\mingw64\bin\libwinpthread-1.dll" "libwinpthread-1.dll" >nul
     )
 )
 

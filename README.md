@@ -81,20 +81,30 @@ The game now features 5 distinct Galactic Sectors with evolving color palettes, 
 ## 🛠️ Building & Running
 
 ### Build & Run on Windows
-Launch with one simple command:
-```cmd
-build.bat run
-```
+Launch with one command:
+- In **PowerShell**:
+  ```powershell
+  .\build.bat run
+  ```
+- In **Command Prompt (CMD)**:
+  ```cmd
+  build.bat run
+  ```
 
 To only compile `game.exe`:
-```cmd
-build.bat
+```powershell
+.\build.bat
 ```
 
 To clean previous build artifacts:
-```cmd
-build.bat clean
+```powershell
+.\build.bat clean
 ```
+
+---
+
+## 🚀 Team Roadmap & Improvements
+See [IMPROVEMENTS.md](file:///d:/2D-Space-Shooter/IMPROVEMENTS.md) for the complete 3-developer project breakdown, user experience enhancements, game feel polish, and milestone roadmap!
 
 ### Compiler Requirements
 - **g++** (MinGW-w64 or MSYS2 UCRT64/MINGW64) with C++11 support.

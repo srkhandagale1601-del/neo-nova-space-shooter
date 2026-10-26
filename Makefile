@@ -1,9 +1,9 @@
 CXX ?= g++
-CXXFLAGS ?= -O2 -Wall -std=c++11
-LIBS = -lfreeglut -lopengl32 -lglu32 -lwinmm
+CXXFLAGS ?= -O2 -Wall -std=c++11 -Iinclude
+LIBS = -static-libgcc -static-libstdc++ -lfreeglut -lopengl32 -lglu32 -lwinmm
 TARGET = game.exe
 
-SRCS = main.cpp
+SRCS = main.cpp src/Audio/SoundEngine.cpp src/Graphics/Renderer.cpp src/Graphics/ParticleSystem.cpp src/Graphics/Starfield.cpp src/Entities/Powerup.cpp
 
 all: $(TARGET)
 
