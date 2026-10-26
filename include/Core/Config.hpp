@@ -19,7 +19,9 @@ enum GameState
     STATE_SETTINGS,
     STATE_HOW_TO_PLAY,
     STATE_GAME_OVER,
-    STATE_SECTOR_CLEAR
+    STATE_SECTOR_CLEAR,
+    STATE_CG_INFO,
+    STATE_HOW_IT_WORKS
 };
 
 // ======================================================

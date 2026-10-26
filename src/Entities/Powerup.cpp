@@ -1,5 +1,6 @@
 #include "Entities/Powerup.hpp"
 #include "Graphics/Renderer.hpp"
+#include "Graphics/CGLab.hpp"
 #include <GL/freeglut.h>
 #include <cstdlib>
 #include <cmath>
@@ -102,26 +103,15 @@ void drawPowerUps()
                 break;
         }
 
-        // Outer glowing polygon
-        glColor4f(r * glow, g * glow, b * glow, 0.9f);
-        glBegin(GL_POLYGON);
-            glVertex2f(powerUps[i].x, powerUps[i].y + hs);
-            glVertex2f(powerUps[i].x + hs, powerUps[i].y);
-            glVertex2f(powerUps[i].x, powerUps[i].y - hs);
-            glVertex2f(powerUps[i].x - hs, powerUps[i].y);
-        glEnd();
-
-        // Inner white highlight rim
+        // Flat round badge with a big letter: bobbing so it is easy to spot
+        float bob = 1.0f + 0.08f * sinf(powerUps[i].pulse * 2.0f);
+        glColor4f(0.0f, 0.0f, 0.0f, 0.2f);
+        drawCircleFill(powerUps[i].x + 4.0f, powerUps[i].y - 4.0f, hs * 1.25f * bob, 20);
+        glColor3f(0.08f, 0.1f, 0.2f);
+        drawCircleFill(powerUps[i].x, powerUps[i].y, hs * 1.3f * bob, 22);
+        glColor3f(r, g, b);
+        drawCircleFill(powerUps[i].x, powerUps[i].y, hs * 1.1f * bob, 22);
         glColor3f(1.0f, 1.0f, 1.0f);
-        glBegin(GL_LINE_LOOP);
-            glVertex2f(powerUps[i].x, powerUps[i].y + hs);
-            glVertex2f(powerUps[i].x + hs, powerUps[i].y);
-            glVertex2f(powerUps[i].x, powerUps[i].y - hs);
-            glVertex2f(powerUps[i].x - hs, powerUps[i].y);
-        glEnd();
-
-        // Icon symbol
-        glColor3f(0.05f, 0.05f, 0.12f);
-        renderGlText(powerUps[i].x - 4.5f, powerUps[i].y - 5.0f, icon, GLUT_BITMAP_HELVETICA_12);
+        renderGlText(powerUps[i].x - 5.0f, powerUps[i].y - 6.0f, icon, GLUT_BITMAP_HELVETICA_18);
     }
 }

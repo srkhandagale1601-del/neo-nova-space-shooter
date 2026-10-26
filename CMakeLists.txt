@@ -14,7 +14,7 @@ add_executable(game
     src/Audio/SoundEngine.cpp
     src/Graphics/Renderer.cpp
     src/Graphics/ParticleSystem.cpp
-    src/Graphics/Starfield.cpp
+    src/Graphics/Starfield.cpp`n    src/Graphics/CGLab.cpp
     src/Entities/Powerup.cpp
 )
 

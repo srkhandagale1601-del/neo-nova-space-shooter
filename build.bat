@@ -2,7 +2,7 @@
 setlocal enabledelayedexpansion
 
 echo ========================================================
-echo   2D Space Shooter - Build System
+echo   VECTOR STORM - Build System
 echo ========================================================
 
 :: Check for clean argument
@@ -41,7 +41,7 @@ if "!COMPILER_FOUND!"=="0" (
 echo Using compiler: !CXX!
 echo Compiling project sources...
 
-!CXX! -O2 -Wall -std=c++11 -Iinclude main.cpp src/Audio/SoundEngine.cpp src/Graphics/Renderer.cpp src/Graphics/ParticleSystem.cpp src/Graphics/Starfield.cpp src/Entities/Powerup.cpp -o game.exe -static-libgcc -static-libstdc++ -lfreeglut -lopengl32 -lglu32 -lwinmm
+!CXX! -O2 -Wall -std=c++11 -Iinclude main.cpp src/Audio/SoundEngine.cpp src/Graphics/Renderer.cpp src/Graphics/ParticleSystem.cpp src/Graphics/Starfield.cpp src/Graphics/CGLab.cpp src/Entities/Powerup.cpp -o game.exe -static-libgcc -static-libstdc++ -lfreeglut -lopengl32 -lglu32 -lwinmm
 if %errorlevel% neq 0 (
     echo [ERROR] Build failed! Check the error messages above.
     exit /b %errorlevel%

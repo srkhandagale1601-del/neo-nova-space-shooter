@@ -1,5 +1,6 @@
 #include "Graphics/ParticleSystem.hpp"
 #include "Graphics/Renderer.hpp"
+#include "Graphics/CGLab.hpp"
 #include <GL/freeglut.h>
 #include <cstdlib>
 #include <cmath>
@@ -19,6 +20,8 @@ void initParticles()
 
 void spawnExplosion(float x, float y, float r, float g, float b, int count, float speedMultiplier)
 {
+    // Every explosion is also a dynamic point light
+    if (count >= 12) addLightFlash(x, y, 28.0f + count * 1.8f * speedMultiplier, r, g, b);
     int spawned = 0;
     for (int i = 0; i < MAX_PARTICLES && spawned < count; i++)
     {
@@ -71,6 +74,7 @@ void spawnEngineTrail(float x, float y, float r, float g, float b, float vyOffse
 
 void updateParticles()
 {
+    updateLightFlashes();
     for (int i = 0; i < MAX_PARTICLES; i++)
     {
         if (particles[i].active)
@@ -93,7 +97,7 @@ void updateParticles()
 void drawParticles()
 {
     glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
     for (int i = 0; i < MAX_PARTICLES; i++)
     {
@@ -109,6 +113,7 @@ void drawParticles()
         }
     }
 
+    drawLightFlashes();
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 }
 
@@ -165,7 +170,7 @@ void drawFloatingTexts()
         {
             float alpha = (float)floatingTexts[i].life / (float)floatingTexts[i].maxLife;
             glColor4f(floatingTexts[i].r, floatingTexts[i].g, floatingTexts[i].b, alpha);
-            renderGlText(floatingTexts[i].x, floatingTexts[i].y, floatingTexts[i].text, GLUT_BITMAP_HELVETICA_12);
+            renderTextOutlined(floatingTexts[i].x, floatingTexts[i].y, floatingTexts[i].text, GLUT_BITMAP_HELVETICA_12, floatingTexts[i].r, floatingTexts[i].g, floatingTexts[i].b, alpha);
         }
     }
 }
